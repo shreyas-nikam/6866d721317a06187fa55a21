@@ -1,104 +1,62 @@
 
 import pytest
 import pandas as pd
-import numpy as np
-
 from <your_module> import generate_synthetic_client_data
 
-# Define the expected columns in the synthetic DataFrame based on the specification:
-# "financial details (income, wealth, liabilities, time horizon)" and
-# "psychometric questionnaire responses" (e.g., 5 questions).
-# These column names are aligned with common practices and the likely structure from the problem context.
+# Define expected columns for the generated DataFrame based on the notebook specification.
+# These include financial factors and a score from psychometric responses.
 EXPECTED_COLUMNS = [
-    'client_id',
-    'annual_income',
-    'income_stability',         # e.g., categorical: 'Very Stable', 'Stable', 'Volatile'
-    'net_worth',
-    'total_liabilities',
-    'investment_time_horizon',  # e.g., in years
-    'num_dependents',
-    'questionnaire_q1',         # Scores from psychometric questions (e.g., 1-4)
-    'questionnaire_q2',
-    'questionnaire_q3',
-    'questionnaire_q4',
-    'questionnaire_q5'
+    'annual_income', 'income_stability', 'net_worth', 'total_liabilities',
+    'investment_time_horizon', 'dependents', 'willingness_score'
 ]
 
 @pytest.mark.parametrize(
-    "num_clients, seed, expected_exception, check_reproducibility",
+    "num_clients, expected_output_type, expected_rows, expected_error_type, expected_error_message_match",
     [
-        # Test Case 1: Basic functionality - generates multiple clients with a specific seed.
-        # Verifies DataFrame type, correct shape (rows and columns), and presence of expected columns.
-        (10, 42, None, False),
-
-        # Test Case 2: Edge case - generates zero clients.
-        # Should return an an empty DataFrame but still with the correct column structure.
-        (0, None, None, False),
-
-        # Test Case 3: Invalid input - negative 'num_clients'.
-        # Expects a ValueError as client count cannot be negative.
-        (-5, None, ValueError, False),
-
-        # Test Case 4: Invalid input - non-integer 'num_clients'.
-        # Expects a TypeError as 'num_clients' should be an integer type.
-        (10.5, None, TypeError, False),
-
-        # Test Case 5: Reproducibility - verifies that the same seed produces identical datasets.
-        # This test case calls the function twice with the same parameters and compares the outputs.
-        (5, 123, None, True),
+        # Test Case 1: Valid positive input (multiple clients)
+        (5, pd.DataFrame, 5, None, None),
+        # Test Case 2: Zero clients (edge case)
+        (0, pd.DataFrame, 0, None, None),
+        # Test Case 3: Single client (edge case)
+        (1, pd.DataFrame, 1, None, None),
+        # Test Case 4: Negative num_clients (edge case - invalid value)
+        (-1, None, None, ValueError, "num_clients must be a non-negative integer"),
+        # Test Case 5: Non-integer num_clients (edge case - invalid type: float)
+        (3.5, None, None, TypeError, "num_clients must be an integer"),
     ]
 )
-def test_generate_synthetic_client_data(num_clients, seed, expected_exception, check_reproducibility):
-    if expected_exception:
-        # If an exception is expected, assert that the function raises it.
-        with pytest.raises(expected_exception):
-            generate_synthetic_client_data(num_clients, seed)
-    elif check_reproducibility:
-        # For reproducibility tests, call the function twice with the same seed
-        # and assert that the resulting DataFrames are identical.
-        df1 = generate_synthetic_client_data(num_clients, seed)
-        df2 = generate_synthetic_client_data(num_clients, seed)
-
-        assert isinstance(df1, pd.DataFrame)
-        assert isinstance(df2, pd.DataFrame)
-        # Ensure correct shape before comparing content
-        assert df1.shape == (num_clients, len(EXPECTED_COLUMNS))
-        assert df2.shape == (num_clients, len(EXPECTED_COLUMNS))
-        pd.testing.assert_frame_equal(df1, df2)
+def test_generate_synthetic_client_data(num_clients, expected_output_type, expected_rows, expected_error_type, expected_error_message_match):
+    if expected_error_type:
+        # If an error is expected, assert that the correct exception is raised
+        with pytest.raises(expected_error_type, match=expected_error_message_match):
+            generate_synthetic_client_data(num_clients)
     else:
-        # For successful generation scenarios, perform general checks on the output DataFrame.
-        df = generate_synthetic_client_data(num_clients, seed)
+        # If no error is expected, assert the DataFrame properties
+        df = generate_synthetic_client_data(num_clients)
+        assert isinstance(df, expected_output_type), f"Expected output type {expected_output_type}, but got {type(df)}"
+        assert len(df) == expected_rows, f"Expected {expected_rows} rows, but got {len(df)}"
 
-        assert isinstance(df, pd.DataFrame)
-        # Verify the DataFrame has the expected number of rows and columns.
-        assert df.shape == (num_clients, len(EXPECTED_COLUMNS))
-        # Verify all expected columns are present in the DataFrame.
-        # Using set comparison for robustness against column order
-        assert set(df.columns) == set(EXPECTED_COLUMNS)
+        # Check for the presence of all expected columns in the DataFrame
+        # This check is crucial for both non-empty and 0-row DataFrames to ensure correct schema.
+        assert all(col in df.columns for col in EXPECTED_COLUMNS), \
+            f"DataFrame is missing one or more expected columns. Expected: {EXPECTED_COLUMNS}, Got: {df.columns.tolist()}"
 
-        # For non-empty DataFrames, perform additional checks on data types and value ranges.
-        if num_clients > 0:
-            assert not df.empty
-            # Check basic data types for some key financial and questionnaire columns.
-            # These checks assume common numerical data types for financial metrics.
-            assert pd.api.types.is_numeric_dtype(df['annual_income'])
-            assert pd.api.types.is_numeric_dtype(df['net_worth'])
-            assert pd.api.types.is_numeric_dtype(df['total_liabilities'])
-            assert pd.api.types.is_integer_dtype(df['investment_time_horizon'])
-            assert pd.api.types.is_integer_dtype(df['num_dependents'])
-            assert pd.api.types.is_integer_dtype(df['client_id'])
+        # For non-empty DataFrames, assert that there are no null values and check data types.
+        if expected_rows > 0:
+            assert not df.isnull().any().any(), "Generated DataFrame contains unexpected null values"
 
-            # Check psychometric question scores are integers and within the expected range (e.g., 1 to 4).
-            for i in range(1, 6):
-                q_col = f'questionnaire_q{i}'
-                assert pd.api.types.is_integer_dtype(df[q_col])
-                # As per spec (Exhibit 2, Page 6-7), scores typically 1 to 4.
-                assert df[q_col].min() >= 1
-                assert df[q_col].max() <= 4
+            # Check data types and value ranges for numeric columns
+            numeric_cols = ['annual_income', 'net_worth', 'total_liabilities', 'investment_time_horizon', 'dependents', 'willingness_score']
+            for col in numeric_cols:
+                if col in df.columns: # Defensive check, though covered by previous assert
+                    assert pd.api.types.is_numeric_dtype(df[col]), f"Column '{col}' is not numeric"
+                    # All these numeric columns are expected to be non-negative based on financial context.
+                    assert (df[col] >= 0).all(), f"Column '{col}' contains negative values"
 
-            # 'income_stability' is described as categorical (e.g., 'Very Stable', 'Stable', 'Volatile').
-            # It should be an object (string) dtype.
-            assert pd.api.types.is_object_dtype(df['income_stability']) or pd.api.types.is_string_dtype(df['income_stability'])
-            # Optional: Further check if values are within expected categories if specific generation logic is known:
-            # allowed_stability_categories = {'Very Stable', 'Stable', 'Volatile'}
-            # assert df['income_stability'].isin(allowed_stability_categories).all()
+            # Check data types and validity for categorical column 'income_stability'
+            if 'income_stability' in df.columns: # Defensive check
+                valid_stability_categories = ['Very Stable', 'Stable', 'Volatile']
+                assert pd.api.types.is_string_dtype(df['income_stability']) or pd.api.types.is_object_dtype(df['income_stability']), \
+                    "Column 'income_stability' is not string/object type"
+                assert df['income_stability'].isin(valid_stability_categories).all(), \
+                    "Column 'income_stability' contains invalid categories"
